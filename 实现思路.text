@@ -1,0 +1,115 @@
+1:如何单独启动netty服务,而不影响其他springboot的功能
+    ①:实现ApplicationListener接口即可
+2:服务端如何监听来自不同客户端的不同请求(请求分类分配转发问题)
+    ①:提供一个实现SimpleChannelInboundHandler的实现类,在channelRead0中msg参数需要能够标识出目标类/方法
+3:如何做到消息的精确投递
+    ①:需要自定义消息协议,客户端/服务端 消息协议一致才会接受,否则应当抛弃(记录日志)
+4:服务端如何接受消息
+    ①两个注解 @RpcService(name = "xx")作用于类上 RpcMapping(url = "xxx/xxx")作用于方法上
+    ②可以根据消息协议中的所属标识->name来定义模块, url来定位所属具体哪个方法
+    ③然后在服务启动的时候就去扫描工程下的这些注解的类,保存起来,在读取消息的时候,根据name来确定哪个类,
+        url来确定类里边的那个方法,然后反射去调用即可(这里注意在启动的时候需要检查name不能有重复的)
+    ④如果需要响应会客户端数据,那么在改方法上加上注解@RpcResponse
+5:客户端如何请求服务端的某个资源
+    ①:定义注解@RpcServiceRequestClient(name = "xx")作用于接口上标识请求的模块, RpcMapping(url = "xxx/xxx")作用于方法上标识请求模块的方法
+        (这里注意在启动的时候需要检查name不能有重复的)
+    ②:在服务启动的时候去扫描这个注解的接口,然后对其创建代理对象(并且注入spring容器),对象添加execute方法，该方法中去调用netty的api写消息
+6:服务端如何主动请求客户端的某个资源
+    ①服务端是不能主动请求客户端的,但是可以使用已经和客户端建立的通道来向客户端发送消息.
+    ②在与客户端建立连接后,将channelId与Channel存在一个ChannelContextHolder中,里边是一个map,key是channelId(这个Id可以定义一个对象,添加客户端的一些基础信息),value是Channel
+    ③有了Channel后就可以向对应的客户端发送消息了.
+7:客户端如何主动请求服务端写数据
+    ①定义注解@RpcServiceRequest(name = "xxx")作用于接口, @RpcMapping(url = "xxx/xxx")作用于方法上,标识请求方法(这里注意在启动的时候需要检查name不能有重复的)
+    ②在服务启动的时候去扫描这个注解的接口,然后创建代理对象,添加execute方法 在方法中添加channelId, Object msg参数 代理对象中要根据channelId去拿到对应的channel,
+    ③例子:
+            @RpcServiceRequest(name = "test")
+            public interface ToClientTestService{
+
+                @RpcMapping(url = "holeClient")
+                void holeClient(String channel, Object msg);
+            }
+            然后对这个接口创建代理对象, 对象中的execute方法在发送消息的时候去ChannelContextHolder中根据channelId获取对应的Channel,然后封装数据,发送
+
+            服务端接收的:
+            定义@RpcService(name = "xxx") 然后使用 @RpcMapping(url = "xxx/xxx")作用于方法上,在channelRead0方法中去根据消息携带的参数去分发消息
+            @RpcService(name="xxx")
+            public class ListenServiceTestService{
+
+                @RpcMapping(url = "holeClient")
+                void holeClient(Object msg){
+                    xxx
+                };
+            }
+7.1：服务端如何主动请求客户端写数据
+    ①定义注解@RpcClientRequest(name = "xxx")作用于接口, @RpcMapping(url = "xxx/xxx")作用于方法上,标识请求方法(这里注意在启动的时候需要检查name不能有重复的)
+    ②在服务启动的时候去扫描这个注解的接口,然后创建代理对象,添加execute方法 在方法中添加channelId, Object msg参数 代理对象中要根据channelId去拿到对应的channel
+        ③例子:
+                @RpcClientRequest(name = "test")
+                public interface ToClientTestService{
+
+                    @RpcMapping(url = "holeClient")
+                    void holeClient(String channel, Object msg);
+                }
+                然后对这个接口创建代理对象, 对象中的execute方法在发送消息的时候去ChannelContextHolder中根据channelId获取对应的Channel,然后封装数据,发送
+
+                客户端接收的:
+                定义@RpcClient(name = "xxx") 然后使用 @RpcMapping(url = "xxx/xxx")作用于方法上,在channelRead0方法中去根据消息携带的参数去分发消息
+                @RpcClient(name="xxx")
+                public class ListenServiceTestService{
+
+                    @RpcMapping(url = "holeClient")
+                    void holeClient(Object msg){
+                        xxx
+                    };
+                }
+
+8:对于客户端请求服务端后，消息回调后如何回传到客户端（有点问题）
+    ①从客户端调用说起的话，应该是客户端发起一个类似feign的调用
+    ②服务端收到请求后，分发到对应的类的方法上去，处理完毕后，返回数据
+    ③这时候客户端监听到服务端的数据，根据消息类型如：response类型然后根据消息的moduleId去找到@RpcClientRequest的代理类
+        @RpcMapping所标记的方法，然后通过反射调用方法去
+
+=============================================================分割线=====================================================================
+
+多个客户端链接一个服务端存在的问题
+    ①场景:k8s场景中,pod是动态创建的,连接外部管理系统的时候,管理系统作为服务端,k8s中的每个pod作为客户端;
+会不会存在多个客户端需要连接多个服务端的场景呢?
+
+
+关于客户端监听类与服务端监听类,被打上注解后需不需要注入spring容器呢
+
+
+==========================================2020/04/27=====================================
+Q:如何在客户端/服务端无感知的情况下发送请求(意思说不需要传递channel的标识也能找到对应的channel)?
+    ①服务端/客户端 监听类 @RpcClient @RpcServer 的注解的moduleId其实是不需要的,类似于springmvc的@Controller @RequestMapping的value属性 保证映射不重复就行了.
+    以前使用的moduleId就放到配置文件中,在客户端/服务端启动,并且和服务端/客户端建立连接的,时候就去将moduleId与ip关联起来(这里需要维护一个全局的映射,moduleId与ip,port的关系,
+    而ip+port又与channel建立起了一个映射关系, 所以就可以根据配置的moduleId -> ip+port -> channel 这样子找到一个链式关系)(或者说直接将 moduleId ->(ip, port, channel)
+    这样子建立一个关系)
+
+Q:需要心跳检测机制(现在默认服务端主动去ping 客户端 30s一次),在客户端掉线后,服务端无法ping通,那么在重试3次,每次间隔10s. 如果还是未收到客户端的心跳,那么将此客户端的session在服务端中移除.
+
+Q:客户端需要一个断线重连的机制, 如果断开连接,那么客户端会以10s一次的频率去主动尝试重连服务端(或许这里需要最大尝试次数?)
+
+Q:客户端/服务端在发送请求后,需要一个ack机制(请求的状态码用来标识客户端到底收没收到消息,业务上使用的场景是 服务端去发布一个模块,需要知道这个模块是否发布好了)
+
+Q:在使用@RpcRequestClient的时候,需要能支持多参数传递
+
+
+
+客户端启动 --携带ip,端口,模块ID--> 服务端 --建立模块ID,ip port的关系列表-->
+
+维护一个Map<模块ID, List<Session>> 的关系(一个模块有多个实例), Session中有 ip, port, profile属性
+
+
+===============================2020/04/29==================================
+客户端与服务端都有可能掉线，
+    由于需要维护会话列表
+①：客户端掉线的情况（可能是容器被销毁，所以无法触发关闭的回调函数）需要客户端做某个机制，比如起一个定时任务，每过30s去遍历一次会话列表，对比上一次会话最后更新的时间大于30s的时候
+    就去将这个会话的channel关掉，并且删掉这个会话在服务端的储存
+②：服务端掉线的情况， 客户端就会一直ping，但是没有回复，会触发没有red的事件，在这个事件里边去关闭连接，然后在关闭连接的回调里边去尝试重连。
+
+
+在启动服务端的时候 ， 需要考虑服务端启动失败的情况，失败后需要进行重试
+参考：https://www.dozer.cc/2015/05/netty-auto-reconnect.html
+启动客户端的时候，不仅要考虑启动失败的情况，还需要考虑与服务端断开的情况
+
