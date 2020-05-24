@@ -1,0 +1,13 @@
+com:
+  github:
+    zy:
+      netty:
+        rpc:
+          server:
+            enable: true
+            port: 6666
+          client:
+            enable: true
+            systemId: testClient
+            ip: 127.0.0.1
+            port: 6666
