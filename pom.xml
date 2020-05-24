@@ -47,18 +47,6 @@
         </dependency>
     </dependencies>
 
-
-    <distributionManagement>
-        <repository>
-            <id>migumusic_maven_releases</id>
-            <url>http://nexus.music.migu.cn:8084/repository/maven-releases/</url>
-        </repository>
-        <snapshotRepository>
-            <id>migumusic_maven_snapshots</id>
-            <url>http://nexus.music.migu.cn:8084/repository/maven-snapshots/</url>
-        </snapshotRepository>
-    </distributionManagement>
-
     <build>
         <plugins>
             <plugin>
